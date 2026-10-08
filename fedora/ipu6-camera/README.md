@@ -73,7 +73,15 @@ sudo dnf remove pipewire-plugin-libcamera
 Failed to find DevName … ov08x40 S
 ```
 
-**Fix:** make a copy of the HAL's config folder made of symlinks, with one edited sensor file. The package's own files stay untouched. Fill in the two values from the check:
+**Already fixed in the HAL itself**, in [intel/ipu6-camera-hal 7ccab62](https://github.com/intel/ipu6-camera-hal/commit/7ccab62d133e053c8628f3591b636a761f06c956) (Sep 25, 2026). Once your distro ships a HAL snapshot from after that date, skip this step, and remove the overlay if you set it up earlier:
+
+```bash
+sudo rm -r /etc/camera/$HAL
+```
+
+Then delete the `CAMERA_CFG_PATH` line from step 4's file. The check script compares the snapshot date for you. As of October 2026, RPM Fusion still ships a June 2025 snapshot.
+
+**Fix until then:** make a copy of the HAL's config folder made of symlinks, with one edited sensor file. The package's own files stay untouched. Fill in the two values from the check:
 
 ```bash
 HAL=ipu6epmtl                 # HAL config folder from the check

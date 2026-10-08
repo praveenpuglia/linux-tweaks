@@ -43,7 +43,15 @@ elif [[ -n $drv ]]; then info "HAL not installed yet ($cfg missing)"; fi
 hdr "Bridge between sensor and IPU"
 bridge=$(grep -hE '^Intel (CVS|IVSC)' /sys/class/video4linux/v4l-subdev*/name 2>/dev/null | head -1)
 case $bridge in
-  "Intel CVS")  ok "Intel CVS in the path → needs the HAL config overlay (step 3)" ;;
+  "Intel CVS")
+    # HAL learned the CVS graph in intel/ipu6-camera-hal 7ccab62 (2026-09-25); RPM Fusion's release has the snapshot date
+    snap=$(rpm -q --qf '%{RELEASE}' ipu6-camera-hal 2>/dev/null | grep -o '20[0-9]\{6\}')
+    if [[ -n $snap && $snap -ge 20260925 ]]; then
+      [[ -d /etc/camera/$hal ]] && no "HAL snapshot $snap handles Intel CVS itself: remove the step 3 overlay" \
+                                || ok "Intel CVS in the path, HAL snapshot $snap handles it: skip step 3"
+    else
+      ok "Intel CVS in the path, HAL snapshot ${snap:-?} predates CVS support → needs step 3"
+    fi ;;
   "Intel IVSC"*) ok "$bridge → the HAL knows this one, skip step 3" ;;
   *)            info "no CVS/IVSC entity → sensor links straight to the IPU, skip step 3" ;;
 esac
