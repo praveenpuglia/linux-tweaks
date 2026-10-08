@@ -1,0 +1,7 @@
+# Espanso settings: https://espanso.org/docs/configuration/
+# No pop-up notifications when Espanso starts or reloads.
+show_notifications: false
+
+# KDE Wayland layout auto-detection fails; set it explicitly.
+keyboard_layout:
+  layout: "us"

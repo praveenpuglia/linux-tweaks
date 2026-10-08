@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", ATTRS{name}!="Espanso virtual device", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="espanso-rescan.service"

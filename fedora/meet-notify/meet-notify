@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Notify with a Join button shortly before calendar meetings that have a video link.
+Reads iCal feed URLs (one per line) from ~/.config/meet-notify/urls.
+  meet-notify            run the loop (used by the systemd user service)
+  meet-notify --list     show meetings with links in the next 24h
+  meet-notify --demo     fire a test notification
+  meet-notify --selftest check the recurrence handling"""
+import json, re, subprocess, sys, threading, time, urllib.request
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from dateutil.rrule import rrulestr
+from icalendar import Calendar
+
+LEAD = timedelta(minutes=1)        # notify this long before start
+GRACE = timedelta(minutes=5)       # still notify if we wake up late (suspend/resume)
+REFRESH = 600                      # seconds between feed downloads
+URLS = Path.home() / ".config/meet-notify/urls"
+CACHE = Path.home() / ".cache/meet-notify"
+LINK = re.compile(r"https://(?:meet\.google\.com/[a-z]+-[a-z]+-[a-z]+|[\w.]*zoom\.us/j/[^\s<>\"\\]+|teams\.microsoft\.com/l/meetup-join/[^\s<>\"\\]+)")
+
+def fetch():
+    CACHE.mkdir(parents=True, exist_ok=True)
+    cals = []
+    for i, url in enumerate(u.strip() for u in URLS.read_text().splitlines() if u.strip()):
+        f = CACHE / f"{i}.ics"
+        if not f.exists() or time.time() - f.stat().st_mtime > REFRESH - 60:
+            try:
+                f.write_bytes(urllib.request.urlopen(url, timeout=30).read())
+            except OSError as e:
+                print(f"feed {i}: {e} (using cache)", file=sys.stderr)
+        if f.exists():
+            cals.append(f.read_bytes())
+    return cals
+
+def link_of(ev):
+    for key in ("X-GOOGLE-CONFERENCE", "LOCATION", "DESCRIPTION", "URL"):
+        m = LINK.search(str(ev.get(key, "")))
+        if m:
+            return m.group(0)
+
+def declined(ev, owner):
+    for a in ev.get("ATTENDEE", []) if isinstance(ev.get("ATTENDEE"), list) else [ev.get("ATTENDEE")] if ev.get("ATTENDEE") else []:
+        if str(a).lower() == f"mailto:{owner}" and a.params.get("PARTSTAT") == "DECLINED":
+            return True
+    return False
+
+def occurrences(raw, start, end):
+    """Yield (start, summary, link) for events with a link starting in [start, end)."""
+    cal = Calendar.from_ical(raw)
+    owner = str(cal.get("X-WR-CALNAME", "")).lower()
+    events = cal.walk("VEVENT")
+    moved = {}                                        # UID -> RECURRENCE-IDs of moved/edited instances
+    for o in events:
+        if "RECURRENCE-ID" in o:
+            moved.setdefault(o.get("UID"), []).append(o["RECURRENCE-ID"].dt)
+    for ev in events:
+        dt = ev.get("DTSTART").dt
+        if not isinstance(dt, datetime) or str(ev.get("STATUS", "")).upper() == "CANCELLED":
+            continue                                  # all-day or cancelled
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        link = link_of(ev)
+        if not link or declined(ev, owner):
+            continue
+        if "RRULE" in ev and "RECURRENCE-ID" not in ev:
+            try:
+                rs = rrulestr(ev["RRULE"].to_ical().decode(), dtstart=dt, forceset=True)
+                for ex in ev.get("EXDATE", []) if isinstance(ev.get("EXDATE"), list) else [ev["EXDATE"]] if "EXDATE" in ev else []:
+                    for d in ex.dts:
+                        rs.exdate(d.dt)
+                # moved/edited instances live in their own VEVENT with RECURRENCE-ID
+                for rid in moved.get(ev.get("UID"), []):
+                    rs.exdate(rid)
+                for occ in rs.between(start, end, inc=True):
+                    yield occ, str(ev.get("SUMMARY", "Meeting")), link
+            except Exception as e:                   # odd RRULE: skip this series, keep going
+                print(f"skip {ev.get('SUMMARY')}: {e}", file=sys.stderr)
+        elif start <= dt < end:
+            yield dt, str(ev.get("SUMMARY", "Meeting")), link
+
+def notify(summary, start, link):
+    def run():
+        body = f"{start.astimezone():%H:%M} · {link.split('//')[1][:40]}"
+        out = subprocess.run(["notify-send", "-a", "Meeting", "-u", "critical", "-i", "camera-video",
+                              "--action=join=Join", summary, body], capture_output=True, text=True).stdout
+        if out.strip() == "join":
+            subprocess.run(["xdg-open", link])
+    threading.Thread(target=run, daemon=True).start()
+
+def loop():
+    # Parsing a big feed is expensive, so expand occurrences for the next few hours
+    # only once per REFRESH and let the 30s check scan that short list.
+    seen, upcoming, planned = set(), [], 0
+    while True:
+        now = datetime.now(timezone.utc)
+        if time.time() - planned > REFRESH:
+            # parse in a child process so the ~300MB the parser touches is freed afterwards
+            out = subprocess.run([sys.executable, __file__, "--plan"], capture_output=True, text=True)
+            if out.returncode == 0:
+                upcoming = [(datetime.fromisoformat(s), t, l) for s, t, l in json.loads(out.stdout)]
+            planned = time.time()
+        for start, summary, link in upcoming:
+            key = (summary, start)
+            if now - GRACE <= start <= now + LEAD and key not in seen:
+                seen.add(key)
+                notify(summary, start, link)
+        time.sleep(30)
+
+def selftest():
+    ics = b"""BEGIN:VCALENDAR
+X-WR-CALNAME:me@example.com
+BEGIN:VEVENT
+UID:a
+SUMMARY:Standup
+DTSTART:20260105T040000Z
+RRULE:FREQ=DAILY;COUNT=5
+EXDATE:20260107T040000Z
+DESCRIPTION:Join with Google Meet: https://meet.google.com/abc-defg-hij
+END:VEVENT
+BEGIN:VEVENT
+UID:a
+RECURRENCE-ID:20260108T040000Z
+SUMMARY:Standup (moved)
+DTSTART:20260108T060000Z
+DESCRIPTION:https://meet.google.com/abc-defg-hij
+END:VEVENT
+BEGIN:VEVENT
+UID:b
+SUMMARY:Declined
+DTSTART:20260105T050000Z
+ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com
+DESCRIPTION:https://meet.google.com/xyz-abcd-efg
+END:VEVENT
+BEGIN:VEVENT
+UID:c
+SUMMARY:No link
+DTSTART:20260105T070000Z
+END:VEVENT
+END:VCALENDAR"""
+    got = sorted((s.strftime("%d %H"), t) for s, t, _ in occurrences(ics, datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc)))
+    assert got == [("05 04", "Standup"), ("06 04", "Standup"), ("08 06", "Standup (moved)"), ("09 04", "Standup")], got
+    print("selftest ok")
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "--selftest":
+        selftest()
+    elif arg == "--demo":
+        notify("Test meeting", datetime.now(timezone.utc), "https://meet.google.com/abc-defg-hij"); time.sleep(60)
+    elif arg == "--plan":                              # used by loop(): occurrences for the next REFRESH window
+        now = datetime.now(timezone.utc)
+        horizon = now + timedelta(seconds=REFRESH) + LEAD + GRACE
+        print(json.dumps([(s.isoformat(), t, l) for raw in fetch() for s, t, l in occurrences(raw, now - GRACE, horizon)]))
+    elif arg == "--list":
+        now = datetime.now(timezone.utc)
+        for raw in fetch():
+            for s, t, l in sorted(occurrences(raw, now, now + timedelta(days=1))):
+                print(f"{s.astimezone():%a %H:%M}  {t}  {l}")
+    else:
+        loop()

@@ -1,0 +1,5 @@
+# Snippets: type the trigger anywhere and it expands.
+# Docs: https://espanso.org/docs/matches/basics/
+matches:
+  - trigger: "imeet"
+    replace: "https://meet.google.com/your-meet-link"

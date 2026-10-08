@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart Espanso so it picks up a newly connected keyboard
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user restart espanso.service

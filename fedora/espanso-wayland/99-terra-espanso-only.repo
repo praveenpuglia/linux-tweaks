@@ -1,0 +1,4 @@
+# Only take Espanso (and Terra's own repo/key packages) from Terra.
+# Lives here so terra-release updates cannot reset it.
+[terra]
+includepkgs=espanso* terra-release terra-gpg-keys
