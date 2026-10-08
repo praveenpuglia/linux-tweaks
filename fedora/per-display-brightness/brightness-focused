@@ -1,0 +1,72 @@
+#!/bin/bash
+# Change brightness only on the display KWin considers active (focused window,
+# or mouse pointer if "Active screen follows mouse" is on).
+# Usage: brightness-focused up|down [percent]   (default 5)
+set -euo pipefail
+
+dir=${1:?usage: brightness-focused up|down [percent]}
+pct=${2:-5}
+svc=org.kde.ScreenBrightness
+root=/org/kde/ScreenBrightness
+iface=org.kde.ScreenBrightness.Display
+
+prop() { busctl --user get-property "$svc" "$root/$1" "$iface" "$2" | cut -d' ' -f2- | tr -d '"'; }
+
+output=${BRIGHTNESS_OUTPUT:-$(busctl --user call org.kde.KWin /KWin org.kde.KWin activeOutputName | cut -d' ' -f2 | tr -d '"')}
+conn=$(echo /sys/class/drm/card*-"$output")
+# Monitor name from EDID (e.g. "DELL U3225QE"); KDE's display labels contain it.
+name=$(python3 -c "
+e=open('$conn/edid','rb').read()
+print(next((e[i+5:i+18].split(b'\n')[0].decode().strip() for i in range(54,126,18) if e[i:i+4]==b'\0\0\0\xfc'), ''))" 2>/dev/null || true)
+
+target=
+for d in $(busctl --user get-property "$svc" "$root" org.kde.ScreenBrightness DisplaysDBusNames | grep -o '"[^"]*"' | tr -d '"'); do
+  case $output in
+    eDP*|LVDS*|DSI*) [[ $(prop "$d" IsInternal) == true ]] && { target=$d; break; } ;;
+    *) [[ -n $name && $(prop "$d" Label) == *"$name"* ]] && { target=$d; break; } ;;
+  esac
+done
+
+run=${XDG_RUNTIME_DIR:-/tmp}
+
+# Show Plasma's brightness OSD on $output's own screen. While an OSD is visible,
+# Plasma adds every display it's told about to it (and keeps it where it is), so
+# close it first when the user moves to a different display.
+osd() {  # osd <percent> <label>
+  [[ $(cat "$run/brightness-last-output" 2>/dev/null) != "$output" ]] &&
+    busctl --user call org.kde.plasmashell /org/kde/osdService org.kde.osdService hide 2>/dev/null
+  echo "$output" > "$run/brightness-last-output"
+  read -r x y w h < <(kscreen-doctor -o 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' |
+    sed -n "/ $output /,/Geometry/s/.*Geometry: \([0-9]*\),\([0-9]*\) \([0-9]*\)x\([0-9]*\)/\1 \2 \3 \4/p")
+  busctl --user call org.kde.plasmashell /org/kde/osdService org.kde.osdService screenBrightnessChanged \
+    'issi(iiii)' "$1" "$output" "$2" 0 "${x:-0}" "${y:-0}" "${w:-1}" "${h:-1}" || true
+}
+
+# KDE can't control this monitor: talk DDC/CI directly. DDC reads/writes take ~1s,
+# so serialize presses with flock and remember the last value for 60s.
+if [[ -z $target ]]; then
+  bus=$(readlink "$conn/ddc" | grep -o '[0-9]*$') || exit 0
+  cache=$run/brightness-ddc-$bus
+  exec 9>"$run/brightness-ddc.lock"; flock 9
+  if [[ -n $(find "$cache" -mmin -1 2>/dev/null) ]]; then
+    read -r cur max < "$cache"
+  else
+    read -r cur max < <(ddcutil --bus "$bus" -t getvcp 10 | awk '{print $4, $5}')
+  fi
+  [[ $dir == up ]] && new=$(( cur + pct )) || new=$(( cur - pct ))
+  (( new > max )) && new=$max
+  (( new < 0 )) && new=0
+  echo "$new $max" > "$cache"
+  osd $(( new * 100 / max )) "${name:-$output}"
+  exec ddcutil --bus "$bus" --noverify setvcp 10 "$new"
+fi
+
+cur=$(prop "$target" Brightness)
+max=$(prop "$target" MaxBrightness)
+step=$(( max * pct / 100 ))
+[[ $dir == up ]] && new=$(( cur + step )) || new=$(( cur - step ))
+(( new > max )) && new=$max
+(( new < 0 )) && new=0
+# flags=1 suppresses PowerDevil's own OSD (it can land on the wrong screen); show ours.
+busctl --user call "$svc" "$root/$target" "$iface" SetBrightness iu "$new" 1
+osd $(( new * 100 / max )) "$(prop "$target" Label)"

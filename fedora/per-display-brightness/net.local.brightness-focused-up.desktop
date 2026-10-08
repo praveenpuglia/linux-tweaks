@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Brightness up (focused display)
+Exec=@HOME@/.local/bin/brightness-focused up
+NoDisplay=true
+X-KDE-GlobalAccel-CommandShortcut=true
+StartupNotify=false
