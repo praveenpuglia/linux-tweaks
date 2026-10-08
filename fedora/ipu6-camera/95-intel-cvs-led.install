@@ -1,0 +1,6 @@
+#!/bin/bash
+# Rebuild the LED-patched intel_cvs for each newly installed kernel.
+[ "$1" = add ] || exit 0
+/usr/local/sbin/intel-cvs-led-build "$2" \
+	|| echo "intel-cvs-led: build for $2 failed; stock intel_cvs (LED off) will load" >&2
+exit 0

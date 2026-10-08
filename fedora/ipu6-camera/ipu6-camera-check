@@ -1,0 +1,72 @@
+#!/bin/bash
+# Read-only: shows which parts of this guide apply to the machine it runs on.
+# Changes nothing. Run it before the setup and again afterwards.
+
+ok()   { printf '  \e[32m✓\e[0m %s\n' "$*"; }
+no()   { printf '  \e[31m✗\e[0m %s\n' "$*"; }
+info() { printf '  · %s\n' "$*"; }
+hdr()  { printf '\n\e[1m%s\e[0m\n' "$*"; }
+
+hdr "Camera controller (IPU)"
+ipu=$(lspci -nn -d 8086: 2>/dev/null | grep -iE 'IPU|imaging' | grep -o '8086:[0-9a-f]*' | head -1)
+case ${ipu#8086:} in
+  9a19|9a39|4e19) hal=ipu6 ;;          # Tiger Lake, Jasper Lake
+  465d|462e|a75d) hal=ipu6ep ;;        # Alder Lake, Raptor Lake
+  7d19)           hal=ipu6epmtl ;;     # Meteor Lake, Arrow Lake
+  645d|b05d)      hal=ipu7 ;;          # Lunar Lake, Panther Lake
+esac
+if [[ -z $ipu ]]; then no "no Intel IPU found: this guide doesn't apply"; exit 1
+elif [[ $hal == ipu7 ]]; then no "$ipu is IPU7: this guide covers IPU6 only"; exit 1
+elif [[ -z $hal ]]; then no "$ipu: unknown IPU, check the HAL folders in /usr/share/defaults/etc/camera/"
+else ok "$ipu → HAL config folder: $hal"; fi
+
+hdr "Sensor"
+sensor=$(grep -hv '^Intel' /sys/class/video4linux/v4l-subdev*/name 2>/dev/null | head -1)
+if [[ -n $sensor ]]; then
+  ok "kernel sensor name: \"$sensor\"   (use this in the HAL config)"
+  drv=${sensor%% *}
+else
+  no "no sensor registered by the kernel"
+  for d in /sys/bus/acpi/devices/{OVTI,HIMX,INT347}*; do   # what the firmware says is fitted
+    [[ $(cat "$d/status" 2>/dev/null) == 15 ]] && info "firmware lists $(basename "$d")"
+  done
+  info "is the sensor driver in your kernel? is the USB-IO bridge driver (usbio) loaded?"
+fi
+cfg=/usr/share/defaults/etc/camera/$hal
+if [[ -n $drv && -d $cfg ]]; then
+  ls "$cfg/sensors/$drv"*.xml &>/dev/null && ok "HAL sensor file: $(cd "$cfg/sensors" && ls "$drv"*.xml | tr '\n' ' ')" \
+                                          || no "the HAL has no config for $drv: the Intel HAL can't drive this sensor"
+  ls "$cfg"/*.aiqb 2>/dev/null | grep -qi "${drv:0:4}" && ok "HAL tuning: $(cd "$cfg" && ls *.aiqb | grep -i "${drv:0:4}" | tr '\n' ' ')" \
+                                                       || info "no tuning file matching $drv found"
+elif [[ -n $drv ]]; then info "HAL not installed yet ($cfg missing)"; fi
+
+hdr "Bridge between sensor and IPU"
+bridge=$(grep -hE '^Intel (CVS|IVSC)' /sys/class/video4linux/v4l-subdev*/name 2>/dev/null | head -1)
+case $bridge in
+  "Intel CVS")  ok "Intel CVS in the path → needs the HAL config overlay (step 3)" ;;
+  "Intel IVSC"*) ok "$bridge → the HAL knows this one, skip step 3" ;;
+  *)            info "no CVS/IVSC entity → sensor links straight to the IPU, skip step 3" ;;
+esac
+usb=$(lsusb 2>/dev/null | grep -oE '06cb:0701|8086:0b63|2ac1:20c1|2ac1:20c9|2ac1:20cb' | head -1)
+[[ -n $usb ]] && ok "USB-IO bridge $usb"
+quirk=$(journalctl -k -b 2>/dev/null | grep -o 'intel_cvs.*Quirks: 0x[0-9a-f]*' | tail -1)
+[[ -n $quirk ]] && info "$quirk"
+if [[ $usb == 06cb:0701 ]]; then
+  [[ $quirk == *0x3a ]] && ok "privacy LED fix active" || no "privacy LED fix needed (step 6): stock quirks are 0x7a"
+fi
+
+hdr "Software stack"
+for p in ipu6-camera-bins ipu6-camera-hal gstreamer1-plugins-icamerasrc v4l2-relayd v4l2loopback; do
+  rpm -q "$p" &>/dev/null && ok "$p ($(rpm -q --qf '%{VERSION}-%{RELEASE}' "$p" | sed 's/\.fc.*//'), from $(rpm -q --qf '%{PACKAGER}' "$p" | grep -oiE 'rpm ?fusion|terra|fedora' || echo '?'))" || no "$p not installed"
+done
+rpm -q pipewire-plugin-libcamera &>/dev/null && no "pipewire-plugin-libcamera installed: apps will also see a bad libcamera camera" \
+                                              || ok "libcamera PipeWire plugin not installed"
+[[ -e /dev/ipu-psys0 ]] && ok "/dev/ipu-psys0 present" || no "/dev/ipu-psys0 missing: is intel_ipu6_psys built and loaded?"
+systemctl is-active -q v4l2-relayd@icamerasrc && ok "v4l2-relayd@icamerasrc running" || no "v4l2-relayd@icamerasrc not running"
+for v in /sys/class/video4linux/video*; do
+  [[ $(cat "$v/name") == "Intel MIPI Camera" ]] && ok "apps see \"Intel MIPI Camera\" at /dev/$(basename "$v")"
+done
+run=$(systemctl show -p InvocationID --value v4l2-relayd@icamerasrc 2>/dev/null)
+err=$([[ -n $run ]] && journalctl _SYSTEMD_INVOCATION_ID="$run" 2>/dev/null | grep -m3 'CamHAL\[ERR\]')
+[[ -n $err ]] && { no "HAL errors in the relay's current run:"; echo "$err" | sed 's/^/      /'; }
+true

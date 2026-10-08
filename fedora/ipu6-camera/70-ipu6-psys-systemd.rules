@@ -1,0 +1,2 @@
+# Expose /dev/ipu-psys0 as a systemd device unit so v4l2-relayd can wait for it.
+SUBSYSTEM=="intel-ipu6-psys", TAG+="systemd"

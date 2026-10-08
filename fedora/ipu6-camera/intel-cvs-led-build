@@ -1,0 +1,34 @@
+#!/bin/bash
+# Rebuild the in-tree intel_cvs module without ICVS_HOST_PRIV_CTRL in the
+# Synaptics SVP7500 (06cb:0701) quirk, so the CVS firmware drives the camera
+# privacy LED (Dell Pro Max 16, MA16250). Signs with the akmods MOK key and
+# installs to /lib/modules/<kver>/updates. Usage: intel-cvs-led-build [kver]
+set -euo pipefail
+KVER=${1:-$(uname -r)}
+KDIR=/usr/src/kernels/$KVER
+SRC=/usr/local/src/intel-cvs-led
+KEY=/etc/pki/akmods/private/private_key.priv
+CERT=/etc/pki/akmods/certs/public_key.der
+DEST=/lib/modules/$KVER/updates/intel_cvs.ko
+log() { echo "intel-cvs-led: $*" >&2; }
+
+[ -d "$KDIR" ] || { log "no kernel-devel for $KVER, skipping"; exit 0; }
+
+W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+TAG=v${KVER%%-*}; TAG=${TAG%.0}
+for f in core.c icvs.h v4l2.c; do
+	curl -sfL -o "$W/$f" "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/media/i2c/cvs/$f?h=$TAG" \
+		|| { log "could not fetch $f for $TAG, using bundled 7.2.8 copy"; cp "$SRC/$f" "$W/$f"; }
+done
+
+if ! sed -n '/0x06CB, 0x0701/,/Synaptics/p' "$W/core.c" | grep -q 'ICVS_HOST_PRIV_CTRL'; then
+	log "$TAG no longer claims the LED for 06cb:0701; using the stock module"
+	rm -f "$DEST"; depmod -a "$KVER"; exit 0
+fi
+sed -i '/0x06CB, 0x0701/,/Synaptics/{/ICVS_HOST_PRIV_CTRL |/d}' "$W/core.c"
+printf 'obj-m := intel_cvs.o\nintel_cvs-y := core.o v4l2.o\n' > "$W/Kbuild"
+make -s -C "$KDIR" M="$W" modules >/dev/null
+"$KDIR/scripts/sign-file" sha256 "$KEY" "$CERT" "$W/intel_cvs.ko"
+install -Dm644 "$W/intel_cvs.ko" "$DEST"
+depmod -a "$KVER"
+log "installed LED-patched intel_cvs for $KVER"

@@ -1,0 +1,34 @@
+--- a/sensors/ov08x40-uf.xml
++++ b/sensors/ov08x40-uf.xml
+@@ -27,21 +27,28 @@
+             <videonode name="ov08x40 $I2CBUS" videoNodeType="VIDEO_PIXEL_ARRAY"/>
+         </MediaCtlConfig>
+         <MediaCtlConfig id="0" mediaCfg="1" ConfigMode="AUTO" outputWidth="3856" outputHeight="2176" format="V4L2_PIX_FMT_SGRBG10"> <!-- RAW10 BE capture -->
+-            <format name="ov08x40 $I2CBUS" pad="0" width="3856" height="2176" format="V4L2_MBUS_FMT_SGRBG10_1X10"/>
++            <!-- Kernel 7.2: the in-tree Intel CVS bridge sits between sensor and CSI2.
++                 The HAL only knows the old "Intel IVSC CSI" name and derives $I2CBUS
++                 from the CSI2 neighbour, so the sensor name is spelled out here. -->
++            <format name="ov08x40 18-0036" pad="0" width="3856" height="2176" format="V4L2_MBUS_FMT_SGRBG10_1X10"/>
++            <format name="Intel CVS" pad="0" width="3856" height="2176" format="V4L2_MBUS_FMT_SGRBG10_1X10"/>
++            <format name="Intel CVS" pad="1" width="3856" height="2176" format="V4L2_MBUS_FMT_SGRBG10_1X10"/>
+             <format name="Intel IPU6 CSI2 $CSI_PORT" pad="0" width="3856" height="2176" format="V4L2_MBUS_FMT_SGRBG10_1X10"/>
+ 
+-            <link srcName="ov08x40 $I2CBUS" srcPad="0" sinkName="Intel IPU6 CSI2 $CSI_PORT" sinkPad="0" enable="true"/>
++            <link srcName="Intel CVS" srcPad="1" sinkName="Intel IPU6 CSI2 $CSI_PORT" sinkPad="0" enable="true"/>
+             <link srcName="Intel IPU6 CSI2 $CSI_PORT" srcPad="1" sinkName="Intel IPU6 ISYS Capture $CAPTURE_ID" sinkPad="0" enable="true"/>
+ 
+             <videonode name="Intel IPU6 ISYS Capture $CAPTURE_ID" videoNodeType="VIDEO_GENERIC"/>
+             <videonode name="Intel IPU6 CSI2 $CSI_PORT" videoNodeType="VIDEO_ISYS_RECEIVER"/>
+-            <videonode name="ov08x40 $I2CBUS" videoNodeType="VIDEO_PIXEL_ARRAY"/>
++            <videonode name="ov08x40 18-0036" videoNodeType="VIDEO_PIXEL_ARRAY"/>
+         </MediaCtlConfig>
+ 
+         <StaticMetadata>
+             <!-- format,widthxheight,field(none:0,alternate:7),mcId -->
+             <supportedStreamConfig value="V4L2_PIX_FMT_NV12,1280x720,0,0,
+                                           V4L2_PIX_FMT_NV12,1920x1080,0,0,
++                                          V4L2_PIX_FMT_NV12,2560x1440,0,0,
++                                          V4L2_PIX_FMT_NV12,3840x2160,0,0,
+                                           V4L2_PIX_FMT_NV12,1280x960,0,0,
+                                           V4L2_PIX_FMT_NV12,2560x1920,0,0,
+                                           V4L2_PIX_FMT_NV12,640x480,0,0,
