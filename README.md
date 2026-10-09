@@ -12,3 +12,4 @@ Fixes, workarounds and small tools from setting up Linux desktops, each written 
 | [Haruna HEVC](fedora/haruna-hevc/) | "missing video track" on phone videos, and why `libavcodec-freeworld` alone doesn't fix it |
 | [Espanso on Wayland](fedora/espanso-wayland/) | A text expander from Terra without letting Terra replace other packages, plus Wayland and keyboard-hotplug fixes |
 | [Meeting notifications](fedora/meet-notify/) | A Join button before Google Meet, Zoom and Teams meetings, which KDE's reminders don't show |
+| [Chrome to the front on links](fedora/chrome-raise/) | Links opened from other apps load in Chrome, but Chrome only flashes in the taskbar instead of coming forward |
