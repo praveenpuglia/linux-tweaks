@@ -4,7 +4,7 @@ Recent Dell laptops with Intel Core Ultra chips use a **MIPI camera**: a bare im
 
 This guide sets it up through **Intel's camera HAL**, the same stack Dell ships on Ubuntu, with Intel's image tuning, at 2560×1440 / 30 fps, with the privacy LED working.
 
-**Tested on:** Dell Pro Max 16 Premium (MA16250), Fedora 44 KDE, kernel 7.2.8, Secure Boot on. Other Dell models with an IPU6 camera need the same core steps. The check script below tells you which of the extra fixes your machine needs.
+**Tested on:** Dell Pro Max 16 Premium (MA16250), Fedora 44 KDE, kernel 7.2.11, `ipu6-camera-hal` 0.0-30, Secure Boot on. Other Dell models with an IPU6 camera need the same core steps. The check script below tells you which of the extra fixes your machine needs.
 
 ## How the camera works
 
@@ -32,10 +32,9 @@ It only reads, never changes anything. Run it again after the setup to confirm e
 |---|---|
 | IPU `8086:7d19` / `a75d` / `465d` / `9a19`… | Supported. Note the **HAL config folder** (e.g. `ipu6epmtl`). |
 | IPU7 (Lunar Lake, Panther Lake) | Not covered here. |
-| **Kernel sensor name**, e.g. `ov08x40 18-0036` | Note it for step 3. |
+| **Kernel sensor name**, e.g. `ov08x40 18-0036` | The kernel found the sensor. |
 | No HAL sensor file for your sensor | The Intel HAL can't drive it. Use libcamera instead. |
-| `Intel CVS` in the path | You need step 3. |
-| `Intel IVSC`, or no bridge | Skip step 3. |
+| `Intel CVS` in the path | Needs `ipu6-camera-hal` from Sep 25, 2026 or later (RPM Fusion 0.0-30+). The check flags an older one. |
 | USB-IO bridge `06cb:0701` | You need step 6 for the privacy LED. |
 
 ## 1. RPM Fusion and a module signing key
@@ -65,46 +64,28 @@ sudo dnf remove pipewire-plugin-libcamera
 - **Don't install `intel-vision`:** on kernel 7.2 its driver is in the kernel.
 - **Removing libcamera's PipeWire plugin:** this stops apps from also offering a second, worse "camera" that goes through libcamera.
 
-## 3. HAL config overlay (only if the check shows `Intel CVS`)
+## 3. HAL config overlay for 2560×1440 (optional)
 
-**Why:** on kernel 7.2, an `Intel CVS` chip sits between the sensor and the IPU. The HAL only knows the older bridge name, `Intel IVSC CSI`. It works out the sensor's name by chopping 8 characters off whatever links into the IPU. From "Intel CVS", that leaves `"S"`, and the HAL fails with:
+**Why:** the HAL only offers the sizes listed in the sensor's config file. For the ov08x40 that's 1280×720, 1920×1080 and 2560×1920 (4:3), with no 16:9 size above 1080p. If 1920×1080 is enough, skip this step and set that size in step 4.
 
-```
-Failed to find DevName … ov08x40 S
-```
-
-**Already fixed in the HAL itself**, in [intel/ipu6-camera-hal 7ccab62](https://github.com/intel/ipu6-camera-hal/commit/7ccab62d133e053c8628f3591b636a761f06c956) (Sep 25, 2026). Once your distro ships a HAL snapshot from after that date, skip this step, and remove the overlay if you set it up earlier:
-
-```bash
-sudo rm -r /etc/camera/$HAL
-```
-
-Then delete the `CAMERA_CFG_PATH` line from step 4's file. The check script compares the snapshot date for you. As of October 2026, RPM Fusion still ships a June 2025 snapshot.
-
-**Fix until then:** make a copy of the HAL's config folder made of symlinks, with one edited sensor file. The package's own files stay untouched. Fill in the two values from the check:
+**Fix:** a copy of the HAL's config folder made of symlinks, with one sensor file that adds 2560×1440 and 3840×2160. The package's own files stay untouched.
 
 ```bash
 HAL=ipu6epmtl                 # HAL config folder from the check
-SENSOR="ov08x40 18-0036"      # kernel sensor name from the check
 
 SRC=/usr/share/defaults/etc/camera/$HAL; D=/etc/camera/$HAL
 sudo mkdir -p $D/sensors
 for f in $SRC/*; do [ "$(basename $f)" = sensors ] || sudo ln -sfn $f $D/; done
 for f in $SRC/sensors/*; do [ "$(basename $f)" = ov08x40-uf.xml ] || sudo ln -sfn $f $D/sensors/; done
-sudo cp $SRC/sensors/ov08x40-uf.xml $D/sensors/
-sed "s/ov08x40 18-0036/$SENSOR/" ov08x40-uf.xml.patch | sudo patch -d $D -p1
+sed '/V4L2_PIX_FMT_NV12,1920x1080,0,0,/a\                                          V4L2_PIX_FMT_NV12,2560x1440,0,0,\n                                          V4L2_PIX_FMT_NV12,3840x2160,0,0,' \
+  $SRC/sensors/ov08x40-uf.xml | sudo tee $D/sensors/ov08x40-uf.xml >/dev/null
 ```
 
-The [patch](ov08x40-uf.xml.patch) edits the `mediaCfg="1"` block, which is the one used with the kernel's IPU6 driver:
+**After a HAL update,** the copied sensor file doesn't follow it. Re-run the block above; it's safe to repeat. The check script tells you when the copy is out of date.
 
-1. Writes out the sensor's full name in place of `$I2CBUS`.
-2. Adds `Intel CVS` pad 0 and pad 1 formats, the same as the sensor's.
-3. Links `Intel CVS` pad 1 → CSI2, instead of sensor → CSI2.
-4. Adds 2560×1440 and 3840×2160 as output sizes.
+**Different sensor?** Use your sensor's `*-uf.xml` in place of `ov08x40-uf.xml`.
 
-**Different sensor?** Make the same four edits in your sensor's `*-uf.xml`, and replace `ov08x40-uf.xml` in the commands above.
-
-**The bus number can change.** The I2C bus number (`18` in `18-0036`) is assigned at boot. If the camera breaks after a BIOS update or hardware change, re-run the check and fix the name in the copied file.
+**Older HAL with `Intel CVS` in the path?** HAL snapshots before Sep 25, 2026 can't handle the Intel CVS chip, so update `ipu6-camera-hal` first. The old workaround is in [this folder's history](https://github.com/praveenpuglia/linux-tweaks/tree/c84bdd0/fedora/ipu6-camera).
 
 ## 4. Relay settings
 
@@ -116,7 +97,7 @@ sudo install -Dm644 50-local-settings.conf \
   /etc/systemd/system/v4l2-relayd@icamerasrc.service.d/50-local-settings.conf
 ```
 
-- **Size and frame rate:** the file sets 2560×1440 at 30 fps. Apps only get this one size. 1920×1080 and 3840×2160 also work.
+- **Size and frame rate:** the file sets 2560×1440 at 30 fps, which needs step 3. Apps only get this one size. 3840×2160 also works with step 3. Without it, use 1920×1080.
 - **Overlay path:** `CAMERA_CFG_PATH` points the HAL at the overlay from step 3. Change `ipu6epmtl` there if your HAL folder is different. If you skipped step 3, delete that line.
 - **Don't edit `/etc/v4l2-relayd.d/icamerasrc.conf`:** it's a package-owned link. At every boot it's pointed back at the HAL's defaults (1280×720, no overlay), and package updates restore it. Your own file, loaded last, always wins.
 
