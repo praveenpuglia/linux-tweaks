@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Dark tray icon and compact profile list for the Pritunl client (pritunl-client-electron).
+# Package updates undo both; run again after updating. Restart Pritunl afterwards.
+set -euo pipefail
+
+app=/usr/lib/pritunl_client_electron/resources/app/dist
+img=$app/img
+
+# Linux always uses the white *_linux_light icons; Pritunl also ships dark ones.
+for s in connected disconnected; do
+    sudo install -m 644 "$img/tray_${s}_linux_dark.png" "$img/tray_${s}_linux_light.png"
+done
+
+# Compact profiles from 1 profile up, instead of only above 3.
+sudo sed -i 's/let minimal = profilesCount > 3 /let minimal = profilesCount > 0 /' "$app"/static/app.*.js
+
+if grep -q 'let minimal = profilesCount > 0 ' "$app"/static/app.*.js; then
+    echo "done; restart Pritunl"
+else
+    echo "icon done; profile patch didn't apply (Pritunl's code changed)" >&2
+    exit 1
+fi
