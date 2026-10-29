@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Apply my Event Calendar settings to every Event Calendar widget on the desktop.
+# Only display and layout choices: no accounts, calendars or location.
+set -euo pipefail
+
+busctl --user call org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell evaluateScript s '
+const settings = {
+	"General": { popupMode: "classic", widgetShowMeteogram: false },
+	"Agenda": { agendaBreakupMultiDayEvents: true },
+	"Google Calendar": { uiStyle: "flat" },
+	"Weather": { weatherShowInViews: false },
+	// Bigger popups froze plasmashell when resized by hand (see README).
+	"": { popupWidth: 477, popupHeight: 600 },
+};
+let n = 0;
+for (const panel of panels()) {
+	for (const w of panel.widgets("org.kde.plasma.eventcalendar")) {
+		for (const group in settings) {
+			w.currentConfigGroup = group ? [group] : [];
+			for (const key in settings[group]) {
+				w.writeConfig(key, settings[group][key]);
+			}
+		}
+		w.reloadConfig();
+		n++;
+	}
+}
+print(n + " widget(s) updated");
+'

@@ -26,6 +26,25 @@ Then right-click the panel → Add Widgets → "Event Calendar", and drag it nex
 - **iCal address (read-only):** in Google Calendar's settings for your calendar, copy "Secret address in iCal format" and add it on the widget's **ICalendar (.ics)** page. The widget can only read it. Keep the address private; anyone with it can see your calendar.
 - **Google sign-in:** the widget's Google Calendar page gives it permission to create, edit and delete events. It only writes when you change an event in it, but KDE's own Google sync (Akonadi) once deleted events on Google, so read-only is the safer choice. If you sign in and later stop using it, also remove its access at myaccount.google.com/connections.
 
+## My settings
+
+After adding the widget to a panel:
+
+```bash
+./apply-settings
+```
+
+It changes only how the widget looks: the classic popup (not the full-height one), flat Google-style event cards, multi-day events split per day in the agenda, no weather in the views or meteogram, and a 477×600 popup. Calendars, accounts and the weather location stay as you set them; add those in the widget's settings.
+
+**Not in the released widget yet:** "Skip all-day events" (Settings → Clock) and a clock button per calendar in the popup's Calendars menu, which keep out-of-office and holiday events out of the countdown by the clock. They're in [PR #5](https://github.com/divinae/plasma-applet-eventcalendar/pull/5). To use them before it's merged, install from that branch:
+
+```bash
+git remote add praveen https://github.com/praveenpuglia/plasma-applet-eventcalendar.git
+git fetch praveen && git switch -c clock-skip-all-day praveen/clock-skip-all-day
+kpackagetool6 -t Plasma/Applet -u package
+systemctl --user restart plasma-plasmashell
+```
+
 ## Known problem: resizing the popup can freeze Plasma
 
 Dragging the popup's edge to resize it froze plasmashell (two cores busy, panel dead). To recover:
