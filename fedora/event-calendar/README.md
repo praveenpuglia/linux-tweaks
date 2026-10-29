@@ -36,14 +36,7 @@ After adding the widget to a panel:
 
 It changes only how the widget looks: the classic popup (not the full-height one), flat Google-style event cards, multi-day events split per day in the agenda, no weather in the views or meteogram, and a 477×600 popup. Calendars, accounts and the weather location stay as you set them; add those in the widget's settings.
 
-**Not in the released widget yet:** "Skip all-day events" (Settings → Clock) and a clock button per calendar in the popup's Calendars menu, which keep out-of-office and holiday events out of the countdown by the clock. They're in [PR #5](https://github.com/divinae/plasma-applet-eventcalendar/pull/5). To use them before it's merged, install from that branch:
-
-```bash
-git remote add praveen https://github.com/praveenpuglia/plasma-applet-eventcalendar.git
-git fetch praveen && git switch -c clock-skip-all-day praveen/clock-skip-all-day
-kpackagetool6 -t Plasma/Applet -u package
-systemctl --user restart plasma-plasmashell
-```
+**Countdown filters (v1.10.0 and later):** Settings → Clock has "Skip all-day events" (on by default), plus options to show only meetings with a link or only accepted ones. To keep a whole calendar (a team's out-of-office calendar, say) out of the countdown, click the clock button next to it in the popup's Calendars menu. These came from [PR #5](https://github.com/divinae/plasma-applet-eventcalendar/pull/5).
 
 ## Known problem: resizing the popup can freeze Plasma
 
@@ -66,4 +59,4 @@ kpackagetool6 -t Plasma/Applet -r org.kde.plasma.eventcalendar
 rm -rf ~/.local/share/plasma_org.kde.plasma.eventcalendar
 ```
 
-Tested with Event Calendar 1.8.1 on Plasma 6.7.5, Fedora 44.
+Tested with Event Calendar NG 1.10.0 on Plasma 6.7.5, Fedora 44.
