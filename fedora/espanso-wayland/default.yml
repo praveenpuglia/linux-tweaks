@@ -5,3 +5,6 @@ show_notifications: false
 # KDE Wayland layout auto-detection fails; set it explicitly.
 keyboard_layout:
   layout: "us"
+
+# Alt+Space opens Espanso search by default; leave it to KRunner.
+search_shortcut: off

@@ -2,6 +2,8 @@
 
 **Problem:** KDE's calendar reminders don't show the Google Meet link. Google stores it in the event's description, which KDE leaves out of the reminder.
 
+> On Plasma 6, the [Event Calendar widget](../event-calendar/) now covers this too (next meeting in the panel, Join buttons, notifications). I switched to it; this notifier is kept for anyone who doesn't want a widget.
+
 **Fix:** a small notifier pops up a **Join** button a minute before any meeting with a Google Meet, Zoom or Teams link. Clicking it opens the link.
 
 ## How it works

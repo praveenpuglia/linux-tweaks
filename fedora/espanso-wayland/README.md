@@ -39,6 +39,7 @@ install -Dm644 base.yml ~/.config/espanso/match/base.yml
 
 - [`default.yml`](default.yml) sets the keyboard layout to `us`. Auto-detection fails on KDE Wayland, and expansions come out garbled or don't fire.
 - [`default.yml`](default.yml) also turns off Espanso's start-up pop-ups.
+- [`default.yml`](default.yml) turns off Espanso's search bar too. It takes Alt+Space, which KDE uses for KRunner.
 - [`base.yml`](base.yml) holds the snippets.
 
 ## 4. Keyboards that connect later
