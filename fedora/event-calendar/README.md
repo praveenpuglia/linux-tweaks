@@ -19,7 +19,7 @@ python3 -m venv /tmp/pipvenv
 rm -rf /tmp/pipvenv
 ```
 
-Then right-click the panel → Add Widgets → "Event Calendar", and drag it next to (or in place of) the clock.
+Then right-click the panel → Add Widgets → "Event Calendar", and drag it next to (or in place of) the clock. More than one screen? [panel-sync](../panel-sync/) copies it to the other panels.
 
 ## Which calendar to connect
 

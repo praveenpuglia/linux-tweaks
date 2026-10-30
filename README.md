@@ -16,3 +16,4 @@ Fixes, workarounds and small tools from setting up Linux desktops, each written 
 | [Dato-like panel clock](fedora/event-calendar/) | Next meeting, Join buttons and time zones in the panel, like Dato on macOS, with a read-only calendar |
 | [Pritunl tray icon and profiles](fedora/pritunl-tray/) | White tray icon that's hard to see on a light panel, and a profile list that won't collapse |
 | [Bitwarden Flatpak tray icon](fedora/bitwarden-tray/) | Tray icon that does nothing when clicked |
+| [Same panel on every screen](fedora/panel-sync/) | Plasma gives each screen its own panel and never syncs them, so widgets and pinned apps differ per screen |

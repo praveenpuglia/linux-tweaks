@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Copy the panel on your main screen to the panels on your other screens.
+
+Plasma keeps a separate panel per screen and never syncs them. This copies
+the widgets, their order and their settings from the main screen's panel to
+the panel on the same edge of every other screen. Each panel keeps its own
+system tray (the tray's icons are already the same on every screen).
+
+Usage: sync-panels [--dry-run] [--from PANEL_ID]
+"""
+import argparse, os, re, shutil, subprocess, sys, time
+
+CONFIG = os.path.expanduser("~/.config/plasma-org.kde.plasma.desktop-appletsrc")
+SYSTRAY = "org.kde.plasma.systemtray"
+# Widgets that would notify once per copy. The copies get these turned off,
+# so only the main screen's widget sends reminders.
+QUIET = {
+    "org.kde.plasma.eventcalendar": ("Events", [
+        "eventReminderNotificationEnabled", "eventStartingNotificationEnabled",
+        "invitationNotificationEnabled", "taskRemindersEnabled", "dailyAgendaEnabled",
+        "meetingAutoJoin", "meetingDoNotDisturb", "meetingFullScreenAlert",
+    ]),
+}
+
+
+def parse(text):
+    """[(section, {key: value}, raw_body)] in file order; section is 'A][B][C'."""
+    return [(s, dict(l.split("=", 1) for l in b.splitlines() if "=" in l), b)
+            for s, b in re.findall(r"^\[(.+?)\]\n((?:(?!\[).*\n?)*)", text, re.M)]
+
+
+def applet_sections(secs, panel, applet):
+    head = f"Containments][{panel}][Applets][{applet}"
+    return [(s[len(head):], body) for s, _, body in secs if s == head or s.startswith(head + "][")]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--dry-run", action="store_true", help="show what would change, touch nothing")
+    ap.add_argument("--from", dest="source", help="panel ID to copy (default: the main screen's)")
+    args = ap.parse_args()
+
+    secs = parse(open(CONFIG).read())
+    conf = {s: kv for s, kv, _ in secs}
+    panels = {s.split("][")[1]: kv for s, kv, _ in secs
+              if re.fullmatch(r"Containments\]\[\d+", s) and kv.get("plugin") == "org.kde.panel"}
+
+    def applets(p):
+        order = conf.get(f"Containments][{p}][General", {}).get("AppletOrder", "")
+        ids = [s.split("][")[3] for s in conf if re.fullmatch(rf"Containments\]\[{p}\]\[Applets\]\[\d+", s)]
+        ordered = [i for i in order.split(";") if i in ids]
+        return [(i, conf[f"Containments][{p}][Applets][{i}"].get("plugin")) for i in ordered + [i for i in ids if i not in ordered]]
+
+    # Pair each panel with the main screen's panel on the same edge.
+    sources = [args.source] if args.source else [p for p, kv in panels.items() if kv.get("lastScreen") == "0"]
+    plan = []
+    for t, kv in panels.items():
+        src = next((s for s in sources if s != t and panels.get(s, {}).get("location") == kv.get("location")), None)
+        if src and t not in sources:
+            plan.append((src, t))
+    if not plan:
+        sys.exit("Nothing to do: no other panels on the same edge as the main screen's panel.")
+
+    next_id = max(int(n) for s, _, _ in secs for n in re.findall(r"(?:Containments|Applets)\]\[(\d+)", s)) + 1
+    drop, add, orders = set(), [], {}
+    for src, t in plan:
+        have = applets(t)
+        unused = list(have)
+        order = []
+        print(f"Panel {t} (screen {panels[t].get('lastScreen')}) <- panel {src}")
+        for sid, plugin in applets(src):
+            mine = next((a for a in unused if a[1] == plugin), None)
+            if plugin == SYSTRAY:  # keep this panel's own tray: it owns a separate containment
+                if mine:
+                    unused.remove(mine)
+                    order.append(mine[0])
+                else:
+                    print(f"  skip {plugin}: this panel has no tray of its own")
+                continue
+            if mine:
+                unused.remove(mine)
+                tid = mine[0]
+                drop.add((t, tid))
+            else:
+                tid = str(next_id)
+                next_id += 1
+            print(f"  {'update' if mine else 'add   '} {plugin}")
+            for suffix, body in applet_sections(secs, src, sid):
+                if plugin in QUIET and suffix == f"][Configuration][{QUIET[plugin][0]}":
+                    body = re.sub(rf"^({'|'.join(QUIET[plugin][1])})=.*\n?", "", body, flags=re.M)
+                    body = "".join(f"{k}=false\n" for k in QUIET[plugin][1]) + body
+                add.append((f"Containments][{t}][Applets][{tid}{suffix}", body))
+            if plugin in QUIET and not any(s.endswith(f"][Configuration][{QUIET[plugin][0]}") for s, _ in applet_sections(secs, src, sid)):
+                add.append((f"Containments][{t}][Applets][{tid}][Configuration][{QUIET[plugin][0]}",
+                            "".join(f"{k}=false\n" for k in QUIET[plugin][1])))
+            order.append(tid)
+        for tid, plugin in unused:
+            print(f"  remove {plugin}")
+            drop.add((t, tid))
+        orders[t] = ";".join(order)
+
+    if args.dry_run:
+        return
+
+    running = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "plasma-plasmashell"]).returncode == 0
+    if running:  # plasmashell rewrites the file on exit, so edit it only while stopped
+        subprocess.run(["systemctl", "--user", "stop", "plasma-plasmashell"], check=True)
+        secs = parse(open(CONFIG).read())
+    backup = f"{CONFIG}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copy2(CONFIG, backup)
+
+    out = []
+    for s, _, body in secs:
+        parts = s.split("][")
+        if len(parts) >= 4 and parts[0] == "Containments" and parts[2] == "Applets" and (parts[1], parts[3]) in drop:
+            continue
+        if len(parts) == 3 and parts[2] == "General" and parts[1] in orders:
+            body = re.sub(r"^AppletOrder=.*\n?", "", body, flags=re.M)
+            body = f"AppletOrder={orders[parts[1]]}\n" + body
+            orders.pop(parts[1])
+        out.append((s, body))
+    out += add + [(f"Containments][{t}][General", f"AppletOrder={o}\n") for t, o in orders.items()]
+    with open(CONFIG, "w") as f:
+        f.write("\n".join(f"[{s}]\n{body.rstrip(chr(10))}\n" for s, body in out))
+
+    print(f"Backup: {backup}")
+    if running:
+        subprocess.run(["systemctl", "--user", "start", "plasma-plasmashell"], check=True)
+
+
+if __name__ == "__main__":
+    main()
